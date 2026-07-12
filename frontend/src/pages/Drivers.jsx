@@ -1,8 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {Ban,MoreHorizontal, Pencil, Plus, Search, ShieldAlert, Trash2, UserRoundCheck, UserRoundX, Users, X} from "lucide-react";
+import {
+  Ban,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  ShieldAlert,
+  Trash2,
+  UserRoundCheck,
+  UserRoundX,
+  Users,
+  X,
+} from "lucide-react";
+
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
+
+const API_URL = "http://127.0.0.1:8000/api/drivers";
 
 const LICENSE_CATEGORIES = ["LMV", "HMV", "MCWG", "TRANS"];
 
@@ -16,11 +32,68 @@ const EMPTY_FORM = {
   status: "available",
 };
 
+function getToken() {
+  return (
+    localStorage.getItem("access_token") ||
+    localStorage.getItem("token") ||
+    localStorage.getItem("transitops-token")
+  );
+}
+
+function getAuthHeaders(includeContentType = false) {
+  const token = getToken();
+
+  const headers = {};
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  if (includeContentType) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  return headers;
+}
+
+async function readApiResponse(response) {
+  let data = null;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error(
+        "Your login session is missing or expired. Please log in again."
+      );
+    }
+
+    if (response.status === 403) {
+      throw new Error(
+        data?.detail || "You do not have permission to perform this action."
+      );
+    }
+
+    throw new Error(
+      data?.detail ||
+        data?.message ||
+        `Request failed with status ${response.status}.`
+    );
+  }
+
+  return data;
+}
+
 function Drivers() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Later, replace this state with data fetched from your backend.
   const [drivers, setDrivers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -33,11 +106,40 @@ function Drivers() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState("");
 
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionDriverId, setActionDriverId] = useState(null);
+
   const user = {
     name: "Fleet Manager",
     role: "Administrator",
     initials: "FM",
   };
+
+  useEffect(() => {
+    fetchDrivers();
+  }, []);
+
+  async function fetchDrivers() {
+    setLoading(true);
+    setPageError("");
+
+    try {
+      const response = await fetch(API_URL, {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const data = await readApiResponse(response);
+
+      setDrivers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Failed to load drivers:", error);
+      setPageError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const filteredDrivers = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -45,10 +147,16 @@ function Drivers() {
     return drivers.filter((driver) => {
       const matchesSearch =
         !query ||
-        driver.fullName.toLowerCase().includes(query) ||
-        driver.licenseNumber.toLowerCase().includes(query) ||
-        driver.phone.includes(query) ||
-        driver.category.toLowerCase().includes(query);
+        String(driver.fullName || "")
+          .toLowerCase()
+          .includes(query) ||
+        String(driver.licenseNumber || "")
+          .toLowerCase()
+          .includes(query) ||
+        String(driver.phone || "").includes(query) ||
+        String(driver.category || "")
+          .toLowerCase()
+          .includes(query);
 
       const effectiveStatus = getEffectiveStatus(driver);
 
@@ -61,7 +169,7 @@ function Drivers() {
 
   function openAddDriver() {
     setEditingDriver(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM });
     setFormError("");
     setDriverModalOpen(true);
   }
@@ -70,13 +178,13 @@ function Drivers() {
     setEditingDriver(driver);
 
     setForm({
-      fullName: driver.fullName,
-      licenseNumber: driver.licenseNumber,
-      category: driver.category,
-      licenseExpiry: driver.licenseExpiry,
-      phone: driver.phone,
-      safetyStatus: driver.safetyStatus,
-      status: driver.status,
+      fullName: driver.fullName || "",
+      licenseNumber: driver.licenseNumber || "",
+      category: driver.category || "",
+      licenseExpiry: driver.licenseExpiry || "",
+      phone: driver.phone || "",
+      safetyStatus: driver.safetyStatus || "available",
+      status: driver.status || "available",
     });
 
     setFormError("");
@@ -84,9 +192,13 @@ function Drivers() {
   }
 
   function closeDriverModal() {
+    if (saving) {
+      return;
+    }
+
     setDriverModalOpen(false);
     setEditingDriver(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM });
     setFormError("");
   }
 
@@ -123,14 +235,6 @@ function Drivers() {
 
     const namePattern = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
     const phonePattern = /^[6-9][0-9]{9}$/;
-
-    /*
-      Indian driving licence format used here:
-      2 letters + 13 digits
-
-      Example:
-      GJ0520240012345
-    */
     const licensePattern = /^[A-Z]{2}[0-9]{13}$/;
 
     if (!fullName) {
@@ -173,8 +277,7 @@ function Drivers() {
 
     const duplicatePhone = drivers.some(
       (driver) =>
-        driver.id !== editingDriver?.id &&
-        driver.phone === phone
+        driver.id !== editingDriver?.id && driver.phone === phone
     );
 
     if (duplicatePhone) {
@@ -184,7 +287,7 @@ function Drivers() {
     return null;
   }
 
-  function handleSaveDriver(event) {
+  async function handleSaveDriver(event) {
     event.preventDefault();
 
     const validationError = validateDriver();
@@ -206,110 +309,174 @@ function Drivers() {
       licenseExpiry: form.licenseExpiry,
       phone: form.phone.trim(),
       safetyStatus: form.safetyStatus,
+
       status:
         form.safetyStatus === "suspended"
           ? "suspended"
           : form.status,
     };
 
-    if (editingDriver) {
+    setSaving(true);
+    setFormError("");
+    setPageError("");
+
+    try {
+      const url = editingDriver
+        ? `${API_URL}/${editingDriver.id}`
+        : API_URL;
+
+      const method = editingDriver ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method,
+        headers: getAuthHeaders(true),
+        body: JSON.stringify(driverData),
+      });
+
+      const savedDriver = await readApiResponse(response);
+
+      if (editingDriver) {
+        setDrivers((current) =>
+          current.map((driver) =>
+            driver.id === editingDriver.id ? savedDriver : driver
+          )
+        );
+      } else {
+        setDrivers((current) => [savedDriver, ...current]);
+      }
+
+      setDriverModalOpen(false);
+      setEditingDriver(null);
+      setForm({ ...EMPTY_FORM });
+      setFormError("");
+    } catch (error) {
+      console.error("Failed to save driver:", error);
+      setFormError(error.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeDriverStatus(driverId, newStatus) {
+    setActionDriverId(driverId);
+    setPageError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/${driverId}/status`,
+        {
+          method: "PATCH",
+          headers: getAuthHeaders(true),
+          body: JSON.stringify({
+            status: newStatus,
+          }),
+        }
+      );
+
+      const updatedDriver = await readApiResponse(response);
+
       setDrivers((current) =>
         current.map((driver) =>
-          driver.id === editingDriver.id
-            ? {
-                ...driver,
-                ...driverData,
-              }
-            : driver
+          driver.id === driverId ? updatedDriver : driver
         )
       );
-    } else {
-      const newDriver = {
-        id: crypto.randomUUID(),
-        ...driverData,
-
-        // These will later come from actual trip records.
-        completedTrips: 0,
-        totalTrips: 0,
-      };
-
-      setDrivers((current) => [...current, newDriver]);
+    } catch (error) {
+      console.error("Failed to change driver status:", error);
+      setPageError(error.message);
+    } finally {
+      setActionDriverId(null);
     }
-
-    closeDriverModal();
   }
 
-  function changeDriverStatus(driverId, newStatus) {
-    setDrivers((current) =>
-      current.map((driver) => {
-        if (driver.id !== driverId) {
-          return driver;
-        }
+  async function suspendDriver(driverId) {
+    setActionDriverId(driverId);
+    setPageError("");
 
-        /*
-          A suspended driver or driver with an expired licence
-          cannot manually become available.
-        */
-        if (
-          newStatus === "available" &&
-          (driver.safetyStatus === "suspended" ||
-            isLicenseExpired(driver.licenseExpiry))
-        ) {
-          return driver;
+    try {
+      const response = await fetch(
+        `${API_URL}/${driverId}/suspend`,
+        {
+          method: "PATCH",
+          headers: getAuthHeaders(),
         }
+      );
 
-        return {
-          ...driver,
-          status: newStatus,
-        };
-      })
-    );
+      const updatedDriver = await readApiResponse(response);
+
+      setDrivers((current) =>
+        current.map((driver) =>
+          driver.id === driverId ? updatedDriver : driver
+        )
+      );
+    } catch (error) {
+      console.error("Failed to suspend driver:", error);
+      setPageError(error.message);
+    } finally {
+      setActionDriverId(null);
+    }
   }
 
-  function suspendDriver(driverId) {
-    setDrivers((current) =>
-      current.map((driver) =>
-        driver.id === driverId
-          ? {
-              ...driver,
-              safetyStatus: "suspended",
-              status: "suspended",
-            }
-          : driver
-      )
-    );
+  async function restoreDriver(driverId) {
+    setActionDriverId(driverId);
+    setPageError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/${driverId}/restore`,
+        {
+          method: "PATCH",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      const updatedDriver = await readApiResponse(response);
+
+      setDrivers((current) =>
+        current.map((driver) =>
+          driver.id === driverId ? updatedDriver : driver
+        )
+      );
+    } catch (error) {
+      console.error("Failed to restore driver:", error);
+      setPageError(error.message);
+    } finally {
+      setActionDriverId(null);
+    }
   }
 
-  function restoreDriver(driverId) {
-    setDrivers((current) =>
-      current.map((driver) => {
-        if (driver.id !== driverId) {
-          return driver;
-        }
-
-        if (isLicenseExpired(driver.licenseExpiry)) {
-          return driver;
-        }
-
-        return {
-          ...driver,
-          safetyStatus: "available",
-          status: "available",
-        };
-      })
-    );
-  }
-
-  function confirmDeleteDriver() {
+  async function confirmDeleteDriver() {
     if (!deleteTarget) {
       return;
     }
 
-    setDrivers((current) =>
-      current.filter((driver) => driver.id !== deleteTarget.id)
-    );
+    setDeleting(true);
+    setPageError("");
 
-    setDeleteTarget(null);
+    try {
+      const response = await fetch(
+        `${API_URL}/${deleteTarget.id}`,
+        {
+          method: "DELETE",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      await readApiResponse(response);
+
+      setDrivers((current) =>
+        current.filter(
+          (driver) => driver.id !== deleteTarget.id
+        )
+      );
+
+      setDeleteTarget(null);
+    } catch (error) {
+      console.error("Failed to delete driver:", error);
+      setPageError(error.message);
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -345,10 +512,27 @@ function Drivers() {
               className="flex w-fit items-center gap-2 rounded-md bg-orange-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-orange-700"
             >
               <Plus size={16} />
-
               Add driver
             </button>
           </div>
+
+          {pageError && (
+            <div
+              role="alert"
+              className="mb-5 flex items-start justify-between gap-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400"
+            >
+              <span>{pageError}</span>
+
+              <button
+                type="button"
+                onClick={() => setPageError("")}
+                className="shrink-0"
+                aria-label="Close error"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
 
           <section className="mb-5 flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 md:flex-row md:items-center">
             <div className="relative w-full md:max-w-md">
@@ -386,21 +570,28 @@ function Drivers() {
               </h2>
 
               <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                {drivers.length === 0
-                  ? "No registered drivers"
-                  : `${drivers.length} registered ${
-                      drivers.length === 1 ? "driver" : "drivers"
-                    }`}
+                {loading
+                  ? "Loading drivers..."
+                  : drivers.length === 0
+                    ? "No registered drivers"
+                    : `${drivers.length} registered ${
+                        drivers.length === 1
+                          ? "driver"
+                          : "drivers"
+                      }`}
               </p>
             </div>
 
-            {drivers.length === 0 ? (
+            {loading ? (
+              <LoadingDrivers />
+            ) : drivers.length === 0 ? (
               <EmptyDrivers onAdd={openAddDriver} />
             ) : filteredDrivers.length === 0 ? (
               <NoSearchResults />
             ) : (
               <DriverTable
                 drivers={filteredDrivers}
+                actionDriverId={actionDriverId}
                 onEdit={openEditDriver}
                 onDelete={setDeleteTarget}
                 onStatusChange={changeDriverStatus}
@@ -435,6 +626,7 @@ function Drivers() {
           isEditing={Boolean(editingDriver)}
           form={form}
           error={formError}
+          saving={saving}
           onChange={handleFormChange}
           onSubmit={handleSaveDriver}
           onClose={closeDriverModal}
@@ -444,10 +636,30 @@ function Drivers() {
       {deleteTarget && (
         <DeleteDriverModal
           driver={deleteTarget}
-          onCancel={() => setDeleteTarget(null)}
+          deleting={deleting}
+          onCancel={() => {
+            if (!deleting) {
+              setDeleteTarget(null);
+            }
+          }}
           onConfirm={confirmDeleteDriver}
         />
       )}
+    </div>
+  );
+}
+
+function LoadingDrivers() {
+  return (
+    <div className="flex min-h-[380px] flex-col items-center justify-center px-6 text-center">
+      <Loader2
+        size={24}
+        className="mb-3 animate-spin text-orange-600"
+      />
+
+      <p className="text-sm font-medium text-zinc-900 dark:text-white">
+        Loading drivers...
+      </p>
     </div>
   );
 }
@@ -477,7 +689,6 @@ function EmptyDrivers({ onAdd }) {
         className="mt-5 flex items-center gap-2 rounded-md bg-orange-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-orange-700"
       >
         <Plus size={16} />
-
         Add your first driver
       </button>
     </div>
@@ -502,6 +713,7 @@ function NoSearchResults() {
 
 function DriverTable({
   drivers,
+  actionDriverId,
   onEdit,
   onDelete,
   onStatusChange,
@@ -509,13 +721,6 @@ function DriverTable({
   onRestore,
 }) {
   return (
-    /*
-      Important:
-      This wrapper only handles horizontal scrolling.
-
-      The three-dot menu is rendered through a React portal,
-      so it does not affect this container's scroll dimensions.
-    */
     <div className="w-full overflow-x-auto">
       <table className="w-full min-w-[1180px] table-auto text-left">
         <thead>
@@ -562,10 +767,9 @@ function DriverTable({
         <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
           {drivers.map((driver) => {
             const expired = isLicenseExpired(driver.licenseExpiry);
-
             const effectiveStatus = getEffectiveStatus(driver);
-
             const tripCompletion = getTripCompletion(driver);
+            const actionLoading = actionDriverId === driver.id;
 
             return (
               <tr
@@ -593,7 +797,6 @@ function DriverTable({
                     }
                   >
                     {formatDate(driver.licenseExpiry)}
-
                     {expired && " · Expired"}
                   </span>
                 </td>
@@ -621,15 +824,24 @@ function DriverTable({
                 </td>
 
                 <td className="whitespace-nowrap px-4 py-4 text-right">
-                  <DriverMenu
-                    driver={driver}
-                    expired={expired}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onStatusChange={onStatusChange}
-                    onSuspend={onSuspend}
-                    onRestore={onRestore}
-                  />
+                  {actionLoading ? (
+                    <span className="inline-flex h-8 w-8 items-center justify-center">
+                      <Loader2
+                        size={17}
+                        className="animate-spin text-orange-600"
+                      />
+                    </span>
+                  ) : (
+                    <DriverMenu
+                      driver={driver}
+                      expired={expired}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      onStatusChange={onStatusChange}
+                      onSuspend={onSuspend}
+                      onRestore={onRestore}
+                    />
+                  )}
                 </td>
               </tr>
             );
@@ -675,24 +887,14 @@ function DriverMenu({
     let left = rect.right - menuWidth;
     let top = rect.bottom + gap;
 
-    /*
-      Prevent menu from going outside left side of screen.
-    */
     if (left < screenPadding) {
       left = screenPadding;
     }
 
-    /*
-      If there is not enough room below the button,
-      open the menu above it.
-    */
     if (top + menuHeight > window.innerHeight - screenPadding) {
       top = rect.top - menuHeight - gap;
     }
 
-    /*
-      Final safety check for the top edge.
-    */
     if (top < screenPadding) {
       top = screenPadding;
     }
@@ -870,7 +1072,6 @@ function MenuButton({
       } disabled:cursor-not-allowed disabled:opacity-40`}
     >
       <Icon size={15} />
-
       <span>{label}</span>
     </button>
   );
@@ -933,32 +1134,35 @@ function DriverModal({
   isEditing,
   form,
   error,
+  saving,
   onChange,
   onSubmit,
   onClose,
 }) {
   useEffect(() => {
     function handleEscape(event) {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !saving) {
         onClose();
       }
     }
 
     document.body.style.overflow = "hidden";
-
     window.addEventListener("keydown", handleEscape);
 
     return () => {
       document.body.style.overflow = "";
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [onClose]);
+  }, [onClose, saving]);
 
   return createPortal(
     <div
       className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
+        if (
+          event.target === event.currentTarget &&
+          !saving
+        ) {
           onClose();
         }
       }}
@@ -980,7 +1184,8 @@ function DriverModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1.5 text-zinc-400 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            disabled={saving}
+            className="rounded-md p-1.5 text-zinc-400 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-zinc-800"
             aria-label="Close modal"
           >
             <X size={18} />
@@ -996,6 +1201,7 @@ function DriverModal({
               onChange={onChange}
               placeholder="Rahul Sharma"
               required
+              disabled={saving}
             />
 
             <FormField
@@ -1005,6 +1211,7 @@ function DriverModal({
               onChange={onChange}
               placeholder="GJ0520240012345"
               required
+              disabled={saving}
             />
 
             <SelectField
@@ -1012,6 +1219,7 @@ function DriverModal({
               name="category"
               value={form.category}
               onChange={onChange}
+              disabled={saving}
             >
               <option value="">Select category</option>
 
@@ -1029,6 +1237,7 @@ function DriverModal({
               value={form.licenseExpiry}
               onChange={onChange}
               required
+              disabled={saving}
             />
 
             <FormField
@@ -1041,6 +1250,7 @@ function DriverModal({
               placeholder="9876543210"
               maxLength={10}
               required
+              disabled={saving}
             />
 
             <SelectField
@@ -1048,6 +1258,7 @@ function DriverModal({
               name="safetyStatus"
               value={form.safetyStatus}
               onChange={onChange}
+              disabled={saving}
             >
               <option value="available">Available</option>
               <option value="suspended">Suspended</option>
@@ -1058,6 +1269,7 @@ function DriverModal({
               name="status"
               value={form.status}
               onChange={onChange}
+              disabled={saving}
             >
               <option value="available">Available</option>
               <option value="off-duty">Off duty</option>
@@ -1078,16 +1290,26 @@ function DriverModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              disabled={saving}
+              className="rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               Cancel
             </button>
 
             <button
               type="submit"
-              className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-orange-700"
+              disabled={saving}
+              className="flex min-w-[110px] items-center justify-center gap-2 rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {isEditing ? "Save changes" : "Add driver"}
+              {saving && (
+                <Loader2 size={15} className="animate-spin" />
+              )}
+
+              {saving
+                ? "Saving..."
+                : isEditing
+                  ? "Save changes"
+                  : "Add driver"}
             </button>
           </div>
         </form>
@@ -1099,12 +1321,13 @@ function DriverModal({
 
 function DeleteDriverModal({
   driver,
+  deleting,
   onCancel,
   onConfirm,
 }) {
   useEffect(() => {
     function handleEscape(event) {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !deleting) {
         onCancel();
       }
     }
@@ -1114,13 +1337,16 @@ function DeleteDriverModal({
     return () => {
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [onCancel]);
+  }, [onCancel, deleting]);
 
   return createPortal(
     <div
       className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/50 p-4"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
+        if (
+          event.target === event.currentTarget &&
+          !deleting
+        ) {
           onCancel();
         }
       }}
@@ -1136,11 +1362,9 @@ function DeleteDriverModal({
 
         <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
           Are you sure you want to delete{" "}
-
           <span className="font-medium text-zinc-900 dark:text-zinc-200">
             {driver.fullName}
           </span>
-
           ? This action cannot be undone.
         </p>
 
@@ -1148,7 +1372,8 @@ function DeleteDriverModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            disabled={deleting}
+            className="rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>
@@ -1156,9 +1381,14 @@ function DeleteDriverModal({
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+            disabled={deleting}
+            className="flex min-w-[120px] items-center justify-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            Delete driver
+            {deleting && (
+              <Loader2 size={15} className="animate-spin" />
+            )}
+
+            {deleting ? "Deleting..." : "Delete driver"}
           </button>
         </div>
       </div>
@@ -1189,7 +1419,7 @@ function FormField({
         onChange={onChange}
         placeholder={placeholder}
         {...props}
-        className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:focus:ring-orange-950"
+        className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:focus:ring-orange-950"
       />
     </label>
   );
@@ -1201,6 +1431,7 @@ function SelectField({
   value,
   onChange,
   children,
+  disabled = false,
 }) {
   return (
     <label className="block">
@@ -1212,7 +1443,8 @@ function SelectField({
         name={name}
         value={value}
         onChange={onChange}
-        className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:focus:ring-orange-950"
+        disabled={disabled}
+        className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-orange-400 focus:ring-2 focus:ring-orange-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:focus:ring-orange-950"
       >
         {children}
       </select>
@@ -1228,7 +1460,7 @@ function getEffectiveStatus(driver) {
     return "suspended";
   }
 
-  return driver.status;
+  return driver.status || "available";
 }
 
 function getTripCompletion(driver) {
