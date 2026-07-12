@@ -8,8 +8,8 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Dashboard />} />
-      {/* <Route path="/vehicles" element={<Vehicles />} />
-      <Route path="/drivers" element={<Drivers />} /> */}
+      <Route path="/vehicles" element={<Vehicles />} />
+      <Route path="/drivers" element={<Drivers />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
