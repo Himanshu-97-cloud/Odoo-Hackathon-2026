@@ -1,110 +1,151 @@
-from pymongo import MongoClient
-from pymongo.database import Database
-from pymongo.errors import ServerSelectionTimeoutError
 from typing import Optional
-from dotenv import load_dotenv
-import os
 
-# Load environment variables
-load_dotenv()
+from pymongo import ASCENDING, MongoClient
+from pymongo.database import Database
+from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
 
-# Configuration
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-DATABASE_NAME = os.getenv("DATABASE_NAME", "transitops")
+from app.core.config import settings
 
-# Global instances
+
 client: Optional[MongoClient] = None
 db: Optional[Database] = None
 
 
-def get_db() -> Database:
+def connect_to_database() -> Database:
     """
-    Returns the MongoDB database instance.
-    Creates the connection only once.
+    Create and verify the MongoDB connection.
+
+    The connection is created only once and reused throughout
+    the application.
     """
     global client, db
 
+    if db is not None:
+        return db
+
+    try:
+        client = MongoClient(
+            settings.MONGO_URI,
+            serverSelectionTimeoutMS=5000,
+        )
+
+        client.admin.command("ping")
+
+        db = client[settings.DATABASE_NAME]
+
+        print(
+            f"[INFO] Connected to MongoDB database: "
+            f"{settings.DATABASE_NAME}"
+        )
+
+        return db
+
+    except ServerSelectionTimeoutError as error:
+        print(f"[ERROR] MongoDB connection failed: {error}")
+        raise RuntimeError(
+            "Could not connect to MongoDB. "
+            "Check MONGO_URI and make sure MongoDB is running."
+        ) from error
+
+
+def get_db() -> Database:
+    """
+    Return the active MongoDB database connection.
+    """
     if db is None:
-        try:
-            client = MongoClient(
-                MONGO_URI,
-                serverSelectionTimeoutMS=5000
-            )
-
-            # Check if MongoDB is reachable
-            client.admin.command("ping")
-
-            db = client[DATABASE_NAME]
-
-            print(f"[INFO] Connected to MongoDB ({DATABASE_NAME})")
-
-        except ServerSelectionTimeoutError as e:
-            print(f"[ERROR] Unable to connect to MongoDB: {e}")
-            raise
+        return connect_to_database()
 
     return db
 
 
-def create_indexes():
+def create_indexes() -> None:
     """
-    Create all required indexes.
-    Call this once when the application starts.
+    Create database indexes required by TransitOps.
     """
-
     database = get_db()
 
-    # Users
-    database.users.create_index("email", unique=True)
+    try:
+        database.users.create_index(
+            [("email", ASCENDING)],
+            unique=True,
+            name="unique_user_email",
+        )
 
-    # Vehicles
-    database.vehicles.create_index(
-        "registration_number",
-        unique=True
-    )
-    database.vehicles.create_index("status")
+        database.vehicles.create_index(
+            [("registration_number", ASCENDING)],
+            unique=True,
+            name="unique_vehicle_registration",
+        )
 
-    # Drivers
-    database.drivers.create_index(
-        "license_number",
-        unique=True
-    )
-    database.drivers.create_index("status")
+        database.vehicles.create_index(
+            [("status", ASCENDING)],
+            name="vehicle_status",
+        )
 
-    # Trips
-    database.trips.create_index("status")
-    database.trips.create_index("vehicle_id")
-    database.trips.create_index("driver_id")
+        database.drivers.create_index(
+            [("license_number", ASCENDING)],
+            unique=True,
+            name="unique_driver_license",
+        )
 
-    # Maintenance
-    database.maintenance_logs.create_index(
-        [
-            ("vehicle_id", 1),
-            ("status", 1)
-        ]
-    )
+        database.drivers.create_index(
+            [("status", ASCENDING)],
+            name="driver_status",
+        )
 
-    print("[INFO] Database indexes created.")
+        database.trips.create_index(
+            [("status", ASCENDING)],
+            name="trip_status",
+        )
+
+        database.trips.create_index(
+            [("vehicle_id", ASCENDING)],
+            name="trip_vehicle",
+        )
+
+        database.trips.create_index(
+            [("driver_id", ASCENDING)],
+            name="trip_driver",
+        )
+
+        database.maintenance_logs.create_index(
+            [
+                ("vehicle_id", ASCENDING),
+                ("status", ASCENDING),
+            ],
+            name="maintenance_vehicle_status",
+        )
+
+        print("[INFO] MongoDB indexes created successfully.")
+
+    except PyMongoError as error:
+        print(f"[ERROR] Failed to create MongoDB indexes: {error}")
+        raise
 
 
 def ping_database() -> bool:
     """
-    Returns True if MongoDB is running.
+    Return True when MongoDB is reachable.
     """
-
     try:
-        get_db().client.admin.command("ping")
+        database = get_db()
+        database.client.admin.command("ping")
         return True
+
     except Exception:
         return False
 
 
-def close_db():
+def close_database() -> None:
     """
-    Close MongoDB connection.
+    Close the MongoDB client connection.
     """
+    global client, db
 
-    global client
-
-    if client:
+    if client is not None:
         client.close()
-        print("[INFO] MongoDB connection closed")
+
+    client = None
+    db = None
+
+    print("[INFO] MongoDB connection closed.")

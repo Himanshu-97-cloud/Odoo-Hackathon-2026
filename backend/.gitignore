@@ -1,16 +1,27 @@
-# Python cache
-__pycache__/
-*.pyc
+# Environment variables and secrets
+.env
 
-# Virtual environments
+# Python virtual environments
 venv/
 .venv/
 
-# Environment variables
-.env
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
 
-# VS Code
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs
 .vscode/
+.idea/
 
-# macOS
+# OS files
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log

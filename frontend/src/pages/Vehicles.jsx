@@ -1,10 +1,38 @@
-import {useEffect, useMemo, useRef, useState} from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
-import {Plus, Search, Truck, X, MoreHorizontal, Pencil, Trash2, CheckCircle, Wrench, Archive} from "lucide-react";
+import {
+  Plus,
+  Search,
+  Truck,
+  X,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  CheckCircle,
+  Wrench,
+  Archive,
+  LoaderCircle,
+} from "lucide-react";
+
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
 
-const VEHICLE_TYPES = ["Truck", "Van", "Bus", "Mini Truck", "Pickup", "Tanker", "Trailer"];
+const API_BASE_URL = "http://127.0.0.1:8000";
+
+const VEHICLE_TYPES = [
+  "Truck",
+  "Van",
+  "Bus",
+  "Mini Truck",
+  "Pickup",
+  "Tanker",
+  "Trailer",
+];
 
 const initialForm = {
   registrationNumber: "",
@@ -16,6 +44,101 @@ const initialForm = {
   status: "available",
 };
 
+function getStoredUser() {
+  try {
+    const savedUser = localStorage.getItem("transitops-user");
+
+    if (!savedUser) {
+      return {
+        name: "Fleet Manager",
+        role: "Fleet Manager",
+        initials: "FM",
+      };
+    }
+
+    const parsedUser = JSON.parse(savedUser);
+
+    const initials = (parsedUser.name || "Fleet Manager")
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+
+    return {
+      ...parsedUser,
+      initials: initials || "FM",
+    };
+  } catch {
+    return {
+      name: "Fleet Manager",
+      role: "Fleet Manager",
+      initials: "FM",
+    };
+  }
+}
+
+function getToken() {
+  return localStorage.getItem("transitops-token");
+}
+
+async function apiRequest(endpoint, options = {}) {
+  const token = getToken();
+
+  const response = await fetch(
+    `${API_BASE_URL}${endpoint}`,
+    {
+      ...options,
+
+      headers: {
+        "Content-Type": "application/json",
+
+        ...(token
+          ? {
+              Authorization: `Bearer ${token}`,
+            }
+          : {}),
+
+        ...options.headers,
+      },
+    }
+  );
+
+  let data = null;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem("transitops-token");
+      localStorage.removeItem("transitops-user");
+
+      window.location.href = "/login";
+
+      throw new Error("Your session has expired.");
+    }
+
+    let message = "Something went wrong.";
+
+    if (typeof data?.detail === "string") {
+      message = data.detail;
+    } else if (Array.isArray(data?.detail)) {
+      message = data.detail
+        .map((item) => item.msg)
+        .join(", ");
+    }
+
+    throw new Error(message);
+  }
+
+  return data;
+}
+
 function Vehicles() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -25,28 +148,67 @@ function Vehicles() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const [vehicleModalOpen, setVehicleModalOpen] = useState(false);
-  const [editingVehicle, setEditingVehicle] = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [vehicleModalOpen, setVehicleModalOpen] =
+    useState(false);
+
+  const [editingVehicle, setEditingVehicle] =
+    useState(null);
+
+  const [deleteTarget, setDeleteTarget] =
+    useState(null);
 
   const [form, setForm] = useState(initialForm);
   const [formError, setFormError] = useState("");
 
-  const user = {
-    name: "Fleet Manager",
-    role: "Administrator",
-    initials: "FM",
-  };
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const [pageError, setPageError] = useState("");
+
+  const user = getStoredUser();
+
+  useEffect(() => {
+    loadVehicles();
+  }, []);
+
+  async function loadVehicles() {
+    setLoading(true);
+    setPageError("");
+
+    try {
+      const data = await apiRequest("/api/vehicles");
+
+      setVehicles(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Load vehicles error:", error);
+
+      setPageError(
+        error.message || "Unable to load vehicles."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const filteredVehicles = useMemo(() => {
     return vehicles.filter((vehicle) => {
       const query = search.trim().toLowerCase();
 
+      const registrationNumber =
+        vehicle.registrationNumber || "";
+
+      const nameModel = vehicle.nameModel || "";
+
+      const vehicleType = vehicle.vehicleType || "";
+
       const matchesSearch =
         !query ||
-        vehicle.registrationNumber.toLowerCase().includes(query) ||
-        vehicle.nameModel.toLowerCase().includes(query) ||
-        vehicle.vehicleType.toLowerCase().includes(query);
+        registrationNumber
+          .toLowerCase()
+          .includes(query) ||
+        nameModel.toLowerCase().includes(query) ||
+        vehicleType.toLowerCase().includes(query);
 
       const matchesType =
         typeFilter === "all" ||
@@ -56,9 +218,18 @@ function Vehicles() {
         statusFilter === "all" ||
         vehicle.status === statusFilter;
 
-      return matchesSearch && matchesType && matchesStatus;
+      return (
+        matchesSearch &&
+        matchesType &&
+        matchesStatus
+      );
     });
-  }, [vehicles, search, typeFilter, statusFilter]);
+  }, [
+    vehicles,
+    search,
+    typeFilter,
+    statusFilter,
+  ]);
 
   function handleFormChange(event) {
     const { name, value } = event.target;
@@ -88,13 +259,26 @@ function Vehicles() {
     setEditingVehicle(vehicle);
 
     setForm({
-      registrationNumber: vehicle.registrationNumber,
-      nameModel: vehicle.nameModel,
-      vehicleType: vehicle.vehicleType,
-      capacity: vehicle.capacity,
-      odometer: vehicle.odometer,
-      acquisitionCost: vehicle.acquisitionCost,
-      status: vehicle.status,
+      registrationNumber:
+        vehicle.registrationNumber || "",
+
+      nameModel:
+        vehicle.nameModel || "",
+
+      vehicleType:
+        vehicle.vehicleType || "",
+
+      capacity:
+        vehicle.capacity ?? "",
+
+      odometer:
+        vehicle.odometer ?? "",
+
+      acquisitionCost:
+        vehicle.acquisitionCost ?? "",
+
+      status:
+        vehicle.status || "available",
     });
 
     setFormError("");
@@ -102,27 +286,22 @@ function Vehicles() {
   }
 
   function closeVehicleModal() {
+    if (saving) return;
+
     setVehicleModalOpen(false);
     setEditingVehicle(null);
     setForm(initialForm);
     setFormError("");
   }
 
-  function handleSaveVehicle(event) {
+  async function handleSaveVehicle(event) {
     event.preventDefault();
 
-    const registrationNumber = form.registrationNumber
-      .trim()
-      .toUpperCase()
-      .replace(/[\s-]/g, "");
-
-    /*
-      Supported examples:
-
-      GJ05AB1234
-      MH12DE1433
-      DL01CA1234
-    */
+    const registrationNumber =
+      form.registrationNumber
+        .trim()
+        .toUpperCase()
+        .replace(/[\s-]/g, "");
 
     const registrationPattern =
       /^[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{4}$/;
@@ -130,7 +309,9 @@ function Vehicles() {
     const nameModelPattern = /[A-Za-z]/;
 
     if (!registrationNumber) {
-      setFormError("Registration number is required.");
+      setFormError(
+        "Registration number is required."
+      );
       return;
     }
 
@@ -142,11 +323,15 @@ function Vehicles() {
     }
 
     if (!form.nameModel.trim()) {
-      setFormError("Vehicle name or model is required.");
+      setFormError(
+        "Vehicle name or model is required."
+      );
       return;
     }
 
-    if (!nameModelPattern.test(form.nameModel.trim())) {
+    if (
+      !nameModelPattern.test(form.nameModel.trim())
+    ) {
       setFormError(
         "Vehicle name or model must contain at least one letter."
       );
@@ -154,20 +339,27 @@ function Vehicles() {
     }
 
     if (!form.vehicleType) {
-      setFormError("Please select a vehicle type.");
+      setFormError(
+        "Please select a vehicle type."
+      );
       return;
     }
 
     const capacity = Number(form.capacity);
     const odometer = Number(form.odometer);
-    const acquisitionCost = Number(form.acquisitionCost);
+
+    const acquisitionCost = Number(
+      form.acquisitionCost
+    );
 
     if (
       !form.capacity ||
       !Number.isFinite(capacity) ||
       capacity <= 0
     ) {
-      setFormError("Capacity must be greater than 0.");
+      setFormError(
+        "Capacity must be greater than 0."
+      );
       return;
     }
 
@@ -176,7 +368,9 @@ function Vehicles() {
       !Number.isFinite(odometer) ||
       odometer < 0
     ) {
-      setFormError("Odometer cannot be negative.");
+      setFormError(
+        "Odometer cannot be negative."
+      );
       return;
     }
 
@@ -185,20 +379,8 @@ function Vehicles() {
       !Number.isFinite(acquisitionCost) ||
       acquisitionCost <= 0
     ) {
-      setFormError("Acquisition cost must be greater than 0.");
-      return;
-    }
-
-    const registrationExists = vehicles.some(
-      (vehicle) =>
-        vehicle.id !== editingVehicle?.id &&
-        vehicle.registrationNumber.toUpperCase() ===
-          registrationNumber
-    );
-
-    if (registrationExists) {
       setFormError(
-        "A vehicle with this registration number already exists."
+        "Acquisition cost must be greater than 0."
       );
       return;
     }
@@ -213,109 +395,130 @@ function Vehicles() {
       status: form.status,
     };
 
-    if (editingVehicle) {
+    setSaving(true);
+    setFormError("");
+
+    try {
+      if (editingVehicle) {
+        const updatedVehicle = await apiRequest(
+          `/api/vehicles/${editingVehicle.id}`,
+          {
+            method: "PUT",
+            body: JSON.stringify(vehicleData),
+          }
+        );
+
+        setVehicles((current) =>
+          current.map((vehicle) =>
+            vehicle.id === editingVehicle.id
+              ? updatedVehicle
+              : vehicle
+          )
+        );
+      } else {
+        const savedVehicle = await apiRequest(
+          "/api/vehicles",
+          {
+            method: "POST",
+            body: JSON.stringify(vehicleData),
+          }
+        );
+
+        setVehicles((current) => [
+          savedVehicle,
+          ...current,
+        ]);
+      }
+
+      setVehicleModalOpen(false);
+      setEditingVehicle(null);
+      setForm(initialForm);
+      setFormError("");
+    } catch (error) {
+      console.error("Save vehicle error:", error);
+
+      setFormError(
+        error.message || "Unable to save vehicle."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeVehicleStatus(
+    vehicleId,
+    newStatus
+  ) {
+    setPageError("");
+
+    try {
+      const updatedVehicle = await apiRequest(
+        `/api/vehicles/${vehicleId}/status`,
+        {
+          method: "PATCH",
+
+          body: JSON.stringify({
+            status: newStatus,
+          }),
+        }
+      );
+
       setVehicles((current) =>
         current.map((vehicle) =>
-          vehicle.id === editingVehicle.id
-            ? {
-                ...vehicle,
-                ...vehicleData,
-              }
+          vehicle.id === vehicleId
+            ? updatedVehicle
             : vehicle
         )
       );
-    } else {
-      const newVehicle = {
-        id: crypto.randomUUID(),
-        ...vehicleData,
-      };
+    } catch (error) {
+      console.error(
+        "Change vehicle status error:",
+        error
+      );
 
-      setVehicles((current) => [
-        ...current,
-        newVehicle,
-      ]);
+      setPageError(
+        error.message ||
+          "Unable to change vehicle status."
+      );
     }
-
-    /*
-      BACKEND VERSION LATER
-
-      For adding:
-
-      const response = await fetch("/api/vehicles", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(vehicleData),
-      });
-
-      const savedVehicle = await response.json();
-
-      setVehicles((current) => [
-        ...current,
-        savedVehicle,
-      ]);
-
-
-      For editing:
-
-      await fetch(`/api/vehicles/${editingVehicle.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(vehicleData),
-      });
-    */
-
-    closeVehicleModal();
   }
 
-  function changeVehicleStatus(vehicleId, newStatus) {
-    setVehicles((current) =>
-      current.map((vehicle) =>
-        vehicle.id === vehicleId
-          ? {
-              ...vehicle,
-              status: newStatus,
-            }
-          : vehicle
-      )
-    );
+  async function confirmDeleteVehicle() {
+    if (!deleteTarget || deleting) return;
 
-    /*
-      BACKEND VERSION LATER:
+    setDeleting(true);
+    setPageError("");
 
-      await fetch(`/api/vehicles/${vehicleId}/status`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          status: newStatus,
-        }),
-      });
-    */
-  }
+    try {
+      await apiRequest(
+        `/api/vehicles/${deleteTarget.id}`,
+        {
+          method: "DELETE",
+        }
+      );
 
-  function confirmDeleteVehicle() {
-    if (!deleteTarget) return;
+      setVehicles((current) =>
+        current.filter(
+          (vehicle) =>
+            vehicle.id !== deleteTarget.id
+        )
+      );
 
-    setVehicles((current) =>
-      current.filter(
-        (vehicle) => vehicle.id !== deleteTarget.id
-      )
-    );
+      setDeleteTarget(null);
+    } catch (error) {
+      console.error(
+        "Delete vehicle error:",
+        error
+      );
 
-    /*
-      BACKEND VERSION LATER:
+      setPageError(
+        error.message || "Unable to delete vehicle."
+      );
 
-      await fetch(`/api/vehicles/${deleteTarget.id}`, {
-        method: "DELETE",
-      });
-    */
-
-    setDeleteTarget(null);
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -332,8 +535,6 @@ function Vehicles() {
         />
 
         <main className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8">
-          {/* Page heading */}
-
           <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
               <p className="mb-1 text-xs font-medium uppercase tracking-wider text-orange-600 dark:text-orange-500">
@@ -345,7 +546,8 @@ function Vehicles() {
               </h1>
 
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                Manage your vehicles and monitor their availability.
+                Manage your vehicles and monitor their
+                availability.
               </p>
             </div>
 
@@ -359,7 +561,19 @@ function Vehicles() {
             </button>
           </div>
 
-          {/* Search and filters */}
+          {pageError && (
+            <div className="mb-5 flex items-center justify-between gap-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+              <span>{pageError}</span>
+
+              <button
+                type="button"
+                onClick={loadVehicles}
+                className="shrink-0 font-medium underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
 
           <section className="mb-5 flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 md:flex-row md:items-center">
             <div className="relative md:w-80">
@@ -391,10 +605,7 @@ function Vehicles() {
               </option>
 
               {VEHICLE_TYPES.map((type) => (
-                <option
-                  key={type}
-                  value={type}
-                >
+                <option key={type} value={type}>
                   {type}
                 </option>
               ))}
@@ -429,8 +640,6 @@ function Vehicles() {
             </select>
           </section>
 
-          {/* Vehicle registry */}
-
           <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
             <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
               <h2 className="text-sm font-semibold text-zinc-950 dark:text-white">
@@ -448,7 +657,9 @@ function Vehicles() {
               </p>
             </div>
 
-            {vehicles.length === 0 ? (
+            {loading ? (
+              <LoadingFleet />
+            ) : vehicles.length === 0 ? (
               <EmptyFleet onAdd={openAddVehicle} />
             ) : filteredVehicles.length === 0 ? (
               <NoSearchResults />
@@ -469,6 +680,7 @@ function Vehicles() {
           isEditing={Boolean(editingVehicle)}
           form={form}
           error={formError}
+          saving={saving}
           onChange={handleFormChange}
           onSubmit={handleSaveVehicle}
           onClose={closeVehicleModal}
@@ -478,10 +690,30 @@ function Vehicles() {
       {deleteTarget && (
         <DeleteVehicleModal
           vehicle={deleteTarget}
-          onCancel={() => setDeleteTarget(null)}
+          deleting={deleting}
+          onCancel={() => {
+            if (!deleting) {
+              setDeleteTarget(null);
+            }
+          }}
           onConfirm={confirmDeleteVehicle}
         />
       )}
+    </div>
+  );
+}
+
+function LoadingFleet() {
+  return (
+    <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center">
+      <LoaderCircle
+        size={28}
+        className="animate-spin text-orange-600"
+      />
+
+      <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+        Loading vehicles...
+      </p>
     </div>
   );
 }
@@ -501,8 +733,8 @@ function EmptyFleet({ onAdd }) {
       </h3>
 
       <p className="mt-1 max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
-        Add your first vehicle to start managing your fleet and dispatching
-        trips.
+        Add your first vehicle to start managing your
+        fleet and dispatching trips.
       </p>
 
       <button
@@ -598,18 +830,23 @@ function VehicleTable({
               </td>
 
               <td className="px-5 py-4 text-zinc-600 dark:text-zinc-300">
-                {vehicle.capacity.toLocaleString()}
+                {Number(
+                  vehicle.capacity
+                ).toLocaleString()}
               </td>
 
               <td className="whitespace-nowrap px-5 py-4 text-zinc-600 dark:text-zinc-300">
-                {vehicle.odometer.toLocaleString()} km
+                {Number(
+                  vehicle.odometer
+                ).toLocaleString()}{" "}
+                km
               </td>
 
               <td className="whitespace-nowrap px-5 py-4 text-zinc-600 dark:text-zinc-300">
                 ₹
-                {vehicle.acquisitionCost.toLocaleString(
-                  "en-IN"
-                )}
+                {Number(
+                  vehicle.acquisitionCost
+                ).toLocaleString("en-IN")}
               </td>
 
               <td className="px-5 py-4">
@@ -922,6 +1159,7 @@ function VehicleModal({
   isEditing,
   form,
   error,
+  saving,
   onChange,
   onSubmit,
   onClose,
@@ -930,7 +1168,10 @@ function VehicleModal({
     <div
       className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
+        if (
+          event.target === event.currentTarget &&
+          !saving
+        ) {
           onClose();
         }
       }}
@@ -953,18 +1194,16 @@ function VehicleModal({
 
           <button
             type="button"
+            disabled={saving}
             onClick={onClose}
-            className="rounded-md p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-white"
+            className="rounded-md p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-50 dark:hover:bg-zinc-800 dark:hover:text-white"
             aria-label="Close modal"
           >
             <X size={18} />
           </button>
         </div>
 
-        <form
-          onSubmit={onSubmit}
-          className="p-5"
-        >
+        <form onSubmit={onSubmit} className="p-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField
               label="Registration number"
@@ -1004,10 +1243,7 @@ function VehicleModal({
                 </option>
 
                 {VEHICLE_TYPES.map((type) => (
-                  <option
-                    key={type}
-                    value={type}
-                  >
+                  <option key={type} value={type}>
                     {type}
                   </option>
                 ))}
@@ -1092,19 +1328,30 @@ function VehicleModal({
           <div className="mt-6 flex justify-end gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800">
             <button
               type="button"
+              disabled={saving}
               onClick={onClose}
-              className="rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               Cancel
             </button>
 
             <button
               type="submit"
-              className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-orange-700"
+              disabled={saving}
+              className="flex min-w-28 items-center justify-center gap-2 rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isEditing
-                ? "Save changes"
-                : "Add vehicle"}
+              {saving && (
+                <LoaderCircle
+                  size={15}
+                  className="animate-spin"
+                />
+              )}
+
+              {saving
+                ? "Saving..."
+                : isEditing
+                  ? "Save changes"
+                  : "Add vehicle"}
             </button>
           </div>
         </form>
@@ -1116,6 +1363,7 @@ function VehicleModal({
 
 function DeleteVehicleModal({
   vehicle,
+  deleting,
   onCancel,
   onConfirm,
 }) {
@@ -1123,7 +1371,10 @@ function DeleteVehicleModal({
     <div
       className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/50 p-4"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
+        if (
+          event.target === event.currentTarget &&
+          !deleting
+        ) {
           onCancel();
         }
       }}
@@ -1148,18 +1399,29 @@ function DeleteVehicleModal({
         <div className="mt-6 flex justify-end gap-2">
           <button
             type="button"
+            disabled={deleting}
             onClick={onCancel}
-            className="rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>
 
           <button
             type="button"
+            disabled={deleting}
             onClick={onConfirm}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+            className="flex min-w-32 items-center justify-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Delete vehicle
+            {deleting && (
+              <LoaderCircle
+                size={15}
+                className="animate-spin"
+              />
+            )}
+
+            {deleting
+              ? "Deleting..."
+              : "Delete vehicle"}
           </button>
         </div>
       </div>

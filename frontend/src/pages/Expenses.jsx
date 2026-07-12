@@ -1,32 +1,43 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   Menu,
   Plus,
   Fuel,
   ReceiptText,
   X,
-  Truck,
-  CalendarDays,
   IndianRupee,
-  Gauge,
-  Route,
-  CircleDollarSign,
+  Search,
+  Moon,
+  Sun,
+  ChevronDown,
 } from "lucide-react";
 
 import Sidebar from "../components/Sidebar";
+
+const inputClass =
+  "h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-orange-500 focus:ring-2 focus:ring-orange-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:focus:ring-orange-950";
 
 function Expenses() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [fuelModalOpen, setFuelModalOpen] = useState(false);
   const [expenseModalOpen, setExpenseModalOpen] = useState(false);
 
-  // Replace these arrays with API data when backend is connected.
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem("theme") === "dark";
+  });
+
   const [fuelLogs, setFuelLogs] = useState([]);
   const [expenses, setExpenses] = useState([]);
 
-  // These will eventually come from your Fleet and Trips APIs.
+  // Replace with API data when backend is connected.
   const vehicles = [];
   const trips = [];
+
+  const user = {
+    name: "Fleet Manager",
+    role: "Administrator",
+    initials: "FM",
+  };
 
   const [fuelForm, setFuelForm] = useState({
     vehicleId: "",
@@ -48,11 +59,10 @@ function Expenses() {
   const [fuelErrors, setFuelErrors] = useState({});
   const [expenseErrors, setExpenseErrors] = useState({});
 
-  const user = {
-    name: "Fleet Manager",
-    role: "Administrator",
-    initials: "FM",
-  };
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", darkMode);
+    localStorage.setItem("theme", darkMode ? "dark" : "light");
+  }, [darkMode]);
 
   const formatCurrency = (value) =>
     new Intl.NumberFormat("en-IN", {
@@ -137,7 +147,6 @@ function Expenses() {
     }
 
     setFuelErrors(errors);
-
     return Object.keys(errors).length === 0;
   }
 
@@ -168,7 +177,6 @@ function Expenses() {
     }
 
     setExpenseErrors(errors);
-
     return Object.keys(errors).length === 0;
   }
 
@@ -267,26 +275,83 @@ function Expenses() {
       />
 
       <div className="min-h-screen lg:pl-60">
-        {/* MOBILE HEADER */}
 
-        <header className="flex h-16 items-center justify-between border-b border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-[#18181b] lg:hidden">
-          <button
-            type="button"
-            onClick={() => setSidebarOpen(true)}
-            className="flex h-10 w-10 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            aria-label="Open navigation"
-          >
-            <Menu size={22} />
-          </button>
+        {/* HEADER */}
 
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-xs font-semibold text-orange-700 dark:bg-orange-950 dark:text-orange-400">
-            {user.initials}
+        <header className="sticky top-0 z-30 flex h-16 items-center border-b border-zinc-200 bg-white/95 px-4 backdrop-blur dark:border-zinc-800 dark:bg-[#18181b]/95 sm:px-6 lg:px-8">
+          <div className="flex w-full items-center justify-between gap-4">
+
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 lg:hidden"
+              aria-label="Open navigation"
+            >
+              <Menu size={22} />
+            </button>
+
+            <div className="hidden w-full max-w-sm items-center lg:flex">
+              <div className="relative w-full">
+                <Search
+                  size={17}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400"
+                />
+
+                <input
+                  type="text"
+                  placeholder="Search vehicles, trips or expenses"
+                  className="h-10 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-10 pr-4 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-orange-400 focus:bg-white focus:ring-2 focus:ring-orange-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:focus:border-orange-600 dark:focus:bg-zinc-900 dark:focus:ring-orange-950"
+                />
+              </div>
+            </div>
+
+            <div className="ml-auto flex items-center gap-3">
+
+              {/* DARK MODE */}
+
+              <button
+                type="button"
+                onClick={() => setDarkMode((current) => !current)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                aria-label="Toggle theme"
+              >
+                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+
+              <div className="hidden h-7 w-px bg-zinc-200 dark:bg-zinc-700 sm:block" />
+
+              {/* PROFILE DISPLAY */}
+
+              <button
+                type="button"
+                className="flex items-center gap-3 rounded-lg p-1 transition hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              >
+                <div className="hidden text-right sm:block">
+                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                    {user.name}
+                  </p>
+
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {user.role}
+                  </p>
+                </div>
+
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-semibold text-orange-700 dark:bg-orange-950 dark:text-orange-400">
+                  {user.initials}
+                </div>
+
+                <ChevronDown
+                  size={16}
+                  className="hidden text-zinc-400 sm:block"
+                />
+              </button>
+            </div>
           </div>
         </header>
 
-        <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          {/* PAGE HEADER */}
+        {/* PAGE CONTENT */}
 
+        <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">
@@ -359,7 +424,6 @@ function Expenses() {
             <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
               <div>
                 <h2 className="font-semibold">Fuel logs</h2>
-
                 <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                   Vehicle refuelling history and fuel costs.
                 </p>
@@ -434,7 +498,6 @@ function Expenses() {
             <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
               <div>
                 <h2 className="font-semibold">Other expenses</h2>
-
                 <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                   Toll charges, miscellaneous costs and linked maintenance.
                 </p>
@@ -517,7 +580,7 @@ function Expenses() {
         </main>
       </div>
 
-      {/* LOG FUEL MODAL */}
+      {/* FUEL MODAL */}
 
       {fuelModalOpen && (
         <Modal
@@ -527,10 +590,7 @@ function Expenses() {
           onClose={closeFuelModal}
         >
           <form onSubmit={handleFuelSubmit} className="space-y-4">
-            <Field
-              label="Vehicle"
-              error={fuelErrors.vehicleId}
-            >
+            <Field label="Vehicle" error={fuelErrors.vehicleId}>
               <select
                 name="vehicleId"
                 value={fuelForm.vehicleId}
@@ -606,7 +666,7 @@ function Expenses() {
         </Modal>
       )}
 
-      {/* ADD EXPENSE MODAL */}
+      {/* EXPENSE MODAL */}
 
       {expenseModalOpen && (
         <Modal
@@ -712,9 +772,6 @@ function Expenses() {
   );
 }
 
-const inputClass =
-  "h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-orange-500 focus:ring-2 focus:ring-orange-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:focus:ring-orange-950";
-
 function SummaryCard({ title, value, description, icon: Icon, last }) {
   return (
     <div
@@ -725,28 +782,42 @@ function SummaryCard({ title, value, description, icon: Icon, last }) {
       }`}
     >
       <div className="flex items-start justify-between">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">{title}</p>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          {title}
+        </p>
 
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
           <Icon size={17} />
         </div>
       </div>
 
-      <p className="mt-4 text-2xl font-semibold tracking-tight">{value}</p>
+      <p className="mt-4 text-2xl font-semibold tracking-tight">
+        {value}
+      </p>
 
-      <p className="mt-1 text-xs text-zinc-400">{description}</p>
+      <p className="mt-1 text-xs text-zinc-400">
+        {description}
+      </p>
     </div>
   );
 }
 
-function EmptyState({ icon: Icon, title, description, buttonText, onClick }) {
+function EmptyState({
+  icon: Icon,
+  title,
+  description,
+  buttonText,
+  onClick,
+}) {
   return (
     <div className="flex min-h-[260px] flex-col items-center justify-center px-6 py-12 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
         <Icon size={20} />
       </div>
 
-      <h3 className="mt-4 text-sm font-semibold">{title}</h3>
+      <h3 className="mt-4 text-sm font-semibold">
+        {title}
+      </h3>
 
       <p className="mt-1 max-w-sm text-sm leading-6 text-zinc-500 dark:text-zinc-400">
         {description}
@@ -782,7 +853,13 @@ function Field({ label, error, children }) {
   );
 }
 
-function Modal({ title, description, icon: Icon, onClose, children }) {
+function Modal({
+  title,
+  description,
+  icon: Icon,
+  onClose,
+  children,
+}) {
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
@@ -799,7 +876,9 @@ function Modal({ title, description, icon: Icon, onClose, children }) {
             </div>
 
             <div>
-              <h2 className="font-semibold">{title}</h2>
+              <h2 className="font-semibold">
+                {title}
+              </h2>
 
               <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                 {description}
@@ -817,7 +896,9 @@ function Modal({ title, description, icon: Icon, onClose, children }) {
           </button>
         </div>
 
-        <div className="p-5">{children}</div>
+        <div className="p-5">
+          {children}
+        </div>
       </div>
     </div>
   );
